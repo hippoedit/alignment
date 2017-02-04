@@ -1,0 +1,231 @@
+#include "he_edit.hejs"
+
+// Alignment plugin for HippoEDIT ins JavaScript port/repork of Python based
+// alignment plugin written by Jarod Long - https://github.com/jlong64
+// Original source can be found here: https://github.com/jlong64/sublime_valign
+
+Application.AddScriptInfo("7E037F29-0C6D-43A3-8753-EC1A55F0C6E1", "Alignment", "1.3", "Easily vertically-align the text around the cursor", "HippoEDIT.com", "supportbox@hippoedit.com", "http://wiki.hippoedit.com/plugins/alignment");
+
+//${ region Icons }
+var nIcon = Application.RegisterImageString(
+'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAAPFBMVEUAAABGRUVVcI/w8fBUbIf///9R\
+ bIwAAABdd5QAAAD5+PhDYYPo6enp6unh4uJSbo3j4+JRbY1GRkZDQT6fsKAbAAAACnRSTlMA////xv//\
+ M/wjYQHgKwAAAFtJREFUGNOFzEcOgDAQQ1EzQAqkwv3vyuAIUSX+5kleGP8tT7p7wGrZAWDBTpzkWrNI\
+ wwEysrkhgBlLSkUHYvYhhhB1IBx6TQfCYdJ0IObjdBCjiTQGwNtrHq82OZUEt7Q9SKIAAAAASUVORK5C\
+ YII=');
+//${ endregion }
+
+function mul(str, num) {
+	return num ? Array(num + 1).join(str) : "";
+}
+
+// Expands the set of rows to all of the lines that match the current indentation level and are
+// not empty.
+function expand_rows_to_indentation(doc, current_row, direction, tab_size, align_style) {
+
+	var indentation = -1;
+	var row = current_row;
+	var check_pattern = align_style ? ("\\" + align_style.char) : ("\\S+\\s+\\S+");
+	for (var i = current_row; i >= 0 && i < doc.LineCount; i += direction) {
+		var line = doc.GetLine(i);
+
+		// Stop at empty lines
+		if (isWhiteText(line)) break;
+
+		// Stop at lines not matching alignment style
+		if (line.search(check_pattern) == -1) break;
+
+		// Calculate the current indentation level.
+		var match = line.match(/^\s+/);
+		var current_indentation = match ? match[0].length : 0;
+
+		if (tab_size) current_indentation /= tab_size;
+
+		// A bit of a hacky fix for issue #7: in JavaScript, we'll treat "var " at the
+		// beginning of a line as another level of indentation to allow alignment of common
+		// JavaScript formatting conventions. In the future we'll extract this out into a
+		// more general solution.
+		if (line.search(/^\s*var /) != -1)++current_indentation;
+
+		// Append or pre-pend current row and break when we hit inconsistent indentation.
+		if (indentation == -1) indentation = current_indentation;
+		else if (current_indentation != indentation) break;
+
+		row = i;
+	}
+
+	return row;
+}
+
+// Returns the alignment style to align on based on the start row.
+// Returns -1 if no matching style found
+function detect_alignment_style(doc, row, alignment_styles) {
+	var line = doc.GetLine(row);
+	for (var i = 0; i < alignment_styles.length; i++) {
+		if (line.search("\\" + alignment_styles[i].char) != -1) return alignment_styles[i];
+	}
+	return null;
+}
+
+// Normalizes the rows, creating a consistent format for alignment.
+function normalize_rows(doc, align_style, first, last) {
+	if (align_style) {
+		for (var row = first; row <= last; ++row) {
+			var line = doc.GetLine(row);
+			var replace_string = "";
+			var replace_pattern = "\\s*\\" + align_style.char + "\\s*";
+			if (align_style.left_space) replace_string += " ";
+
+			for (var n = 0; n < align_style.prefixes.length; n++) {
+				var prefix = align_style.prefixes[n];
+				if (line.search("\\" + prefix + "\\" + align_style.char) != -1) {
+					replace_pattern = "\\s*\\" + prefix + align_style.char + "\\s*";
+					replace_string += prefix;
+					break;
+				}
+			}
+
+			replace_string += align_style.char;
+			if (align_style.right_space) replace_string += " ";
+			var pos = line.search(replace_pattern);
+			if (pos != -1) doc.ReplaceText(new Range(row, pos, row, pos + RegExp.lastMatch.length), replace_string);
+		}
+	} else {
+		var replace_pattern = /\S\s+/;
+		for (var row = first; row <= last; ++row) {
+			var pos = doc.GetLine(row).search(replace_pattern);
+			if (pos != -1) doc.ReplaceText(new Range(row, pos + 1, row, pos + RegExp.lastMatch.length - 1), " ");
+		}
+	}
+}
+
+// Aligns all the rows after they've been calculated.
+function align_rows(doc, align_style, first, last) {
+	var char_indexes = [];
+	var max_char_index = null;
+
+	// Gather all of the character indexes.
+	for (var row = first; row <= last; row++) {
+		var line = doc.GetLine(row);
+		var index = 0;
+		var has_prefix = false;
+
+		if (align_style) {
+			index = line.search("\\" + align_style.char);
+			for (var n = 0; n < align_style.prefixes.length; n++) {
+				var prefix = align_style.prefixes[n];
+				if (line.charAt(index - 1) == align_style.prefixes[n]) {
+					index -= 1;
+					has_prefix = true;
+					break;
+				}
+			}
+
+			if (align_style.alignment == "left") index++;
+		} else {
+			index = line.search(/\S\s/) + 1;
+		}
+
+		var char_index = {
+			index: index,
+			has_prefix: has_prefix
+		};
+		char_indexes.push(char_index);
+
+		if (!max_char_index || index > max_char_index.index) max_char_index = char_index;
+	}
+
+	// Do the alignment!
+	for (var row = first; row <= last; row++) {
+		char_index = char_indexes[row - first];
+		if (char_index.index != -1) {
+			var extra_spaces = max_char_index.index - char_index.index;
+
+			if (char_index.has_prefix && !max_char_index.has_prefix) extra_spaces--;
+			else if (!char_index.has_prefix && max_char_index.has_prefix) extra_spaces++;
+
+			doc.InsertText(new Position(row, char_index.index), mul(" ", extra_spaces));
+		}
+	}
+}
+
+var vCommand = new Command("Alignment.VAlign", "Align Code", "Vertically align code on current cursor position", nIcon);
+vCommand.onExecute = function() {
+	var align_words = readStorage("va_align_words", true);
+	var alignment_chars = readStorage("va_alignment_chars", [{
+		// PHP arrays
+		char: "=>",
+		alignment: "right",
+		left_space: true,
+		right_space: true,
+		prefixes: []
+	}, {
+		char: "=",
+		alignment: "right",
+		left_space: true,
+		right_space: true,
+		prefixes: ["+", "-", "&", "|", "<", ">", "!", "~", "%", "/", "*", "."]
+	}, {
+		char: ":",
+		alignment: "left",
+		left_space: false,
+		right_space: true,
+		prefixes: []
+	}]);
+
+	var doc = ActiveDocument;
+	var sel = ActiveView.Selection;
+	var start_row = sel.Top;
+
+	// Bail if our start row is empty
+	if (!sel.Height && isEmptyLine(doc, start_row)) return;
+
+	var TabMode = doc.Syntax.TabMode;
+	var bUseTabs = (TabMode != eTabModeTabsToSpaces);
+	if (bUseTabs && TabMode == eTabModeAuto) bUseTabs = doc.TabUsed;
+
+	var align_style = detect_alignment_style(doc, start_row, alignment_chars);
+
+	// Calculate line range that will be affected by the alignment
+	var tab_size = bUseTabs ? 0 : doc.TabSize;
+	var first = sel.Height ? sel.Top : expand_rows_to_indentation(doc, start_row, - 1, tab_size, align_style);
+	var last = sel.Height ? sel.Bottom : expand_rows_to_indentation(doc, start_row, + 1, tab_size, align_style);
+
+	// Bail if we have no alignment character and we don't align words.
+	if ((!align_style && !align_words) || first == last) return;
+
+	doc.BeginUndoGroup(false, AddUndoActionType("Align code"));
+
+	// Normalize the rows to get consistent formatting for alignment.
+	normalize_rows(doc, align_style, first, last);
+
+	// If we have valid rows, align them.
+	align_rows(doc, align_style, first, last);
+
+	doc.FlushUndoGroup();
+};
+vCommand.onEnabled = function() {
+	return ActiveDocument !== null && ActiveDocument.ReadOnly !== true;
+};
+
+Application.RegisterCommand(vCommand);
+
+////////////////////////////////////////////////////////////////////////
+// Initialize Toolbar
+Application.onInitToolbars = function() {
+	var MyToolbar = this.GetToolBar("Alignment", true);
+	MyToolbar.Name = "Alignment";
+	MyToolbar.AddButton(vCommand);
+};
+
+////////////////////////////////////////////////////////////////////////
+// Update main menu with our items
+Application.onInitMainMenu = function(bUpdate) {
+	if (bUpdate === false) {
+		var menu_location = this.GetMenuItemPos("Edit.DeleteDuplicates");
+		if (menu_location.Menu !== null && menu_location.Position != -1) {
+			menu_location.Menu.InsertItem(menu_location.Position + 1, "", vCommand);
+			menu_location.Menu.InsertItem(menu_location.Position + 1);
+		}
+	}
+};

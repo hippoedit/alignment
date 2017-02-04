@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!DOCTYPE package-info SYSTEM "http://www.hippoedit.com/xml/package-info">
+<package-info xmlns="http://www.hippoedit.com/xml/package-info" xmlns:smf="http://www.hippoedit.com/">
+	<id>7E037F29-0C6D-43A3-8753-EC1A55F0C6E1</id>
+	<name>Alignment</name>
+	<version>1.3</version>
+	<description>Easily vertically-align the text around the cursor</description>
+	<author>HippoEDIT.com</author>
+	<email>supportbox@hippoedit.com</email>
+	<homepage>http://wiki.hippoedit.com/plugins/alignment</homepage>
+	<memo></memo>
+	<install>
+		<readme type="inline">This will install Alignment plugin for HippoEDIT.</readme>
+		<require-file name="alignment.hejs" destination="%{plugins}%/alignment.hejs" />
+		<install-plugin path="%{plugins}%/alignment.hejs"/>
+	</install>
+	<uninstall>
+		<readme type="inline">This will uninstall Alignment plugin for HippoEDIT.</readme>
+		<uninstall-plugin id="7E037F29-0C6D-43A3-8753-EC1A55F0C6E1"/>
+		<remove-file name="%{plugins}%/alignment.hejs" />
+	</uninstall>
+</package-info>
